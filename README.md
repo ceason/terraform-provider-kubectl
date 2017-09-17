@@ -4,6 +4,8 @@
 ## Usage
 This provider has a few prerequsites right now:
 - `kubectl` must exist on your $PATH (may change in future)
+- Download the plugin from the [Releases](https://github.com/ceason/terraform-provider-kubectl/releases) page
+- [Install](https://terraform.io/docs/plugins/basics.html) it
 
 Example "generic object" resource
 ```hcl
