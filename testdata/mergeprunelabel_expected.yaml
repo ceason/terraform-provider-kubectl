@@ -1,0 +1,19 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    terraformKubectlPrunelabel: aos9mra4rdf
+  name: hello-go
+  namespace: some-namespace-name
+spec:
+  replicas: 3
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+      labels:
+        app: hello-go
+    spec:
+      containers:
+      - image: k8s-hello-go:1.0
+        name: server
