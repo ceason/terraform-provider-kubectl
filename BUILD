@@ -11,7 +11,6 @@ go_library(
     name = "go_default_library",
     srcs = [
         "kubectl_cli.go",
-        "kubectl_client.go",
         "main.go",
         "provider.go",
         "resource_generic_object.go",
