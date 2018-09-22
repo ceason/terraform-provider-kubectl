@@ -7,39 +7,161 @@ import (
 	"github.com/golang/glog"
 	"os/exec"
 	"strings"
+	"strconv"
 	"gopkg.in/yaml.v2"
+	"crypto/sha256"
+	"encoding/json"
+	"runtime"
 )
 
-const (
-	KUBECTL_APPLY_PRUNELABEL = "terraformKubectlPrunelabel"
-)
+func NewKubectlCli(context string, defaultNamespace string) (*kubectlCli, error) {
 
-type kubectlCli struct {
-	context string
+	stdout, _, err := executeCmd(fmt.Sprintf("kubectl --context=%s api-resources", context), "")
+	if err != nil {
+		return nil, err
+	}
+	stdoutLines := strings.Split(stdout, "\n")
+	// find the starting index of relevant columns
+	apiGroupIdx := strings.Index(stdoutLines[0], "APIGROUP")
+	if apiGroupIdx == -1 {
+		return nil, errors.New(fmt.Sprintf("Could not find APIGROUP column in 'kubectl api-resources' output: %s", stdout))
+	}
+	var resources []apiResource
+	for _, line := range stdoutLines[1:] {
+		if line == "" {
+			continue
+		}
+		runes := []rune(line)
+		substr := string(runes[apiGroupIdx:])
+		fields := strings.Fields(substr)
+		namespaced, err := strconv.ParseBool(fields[len(fields)-2])
+		if err != nil {
+			return nil, err
+		}
+		resource := apiResource{
+			name:       strings.Fields(substr)[0],
+			kind:       fields[len(fields)-1],
+			namespaced: namespaced,
+		}
+		if len(fields) > 2 {
+			resource.apiGroup = fields[0]
+		}
+		resources = append(resources, resource)
+	}
+
+	client := &kubectlCli{
+		context:          context,
+		apiResources:     resources,
+		defaultNamespace: defaultNamespace,
+	}
+	if client.defaultNamespace == "" {
+		stdout, _, err := executeCmd(fmt.Sprintf("kubectl --context=%s config view --minify --merge \"-ogo-template={{(index .contexts 0).context.namespace}}\" ", context), "")
+		if err != nil {
+			return nil, err
+		}
+		if stdout == "<no value>" {
+			client.defaultNamespace = "default"
+		} else {
+			client.defaultNamespace = stdout
+		}
+	}
+
+	return client, nil
 }
 
-func (cfg *kubectlCli) Apply(yamlObject string, pruneId string) error {
-	cmdInput, err := mergePrunelabel(yamlObject, pruneId)
+type kubectlCli struct {
+	context          string
+	defaultNamespace string
+	apiResources     []apiResource
+}
+
+func (k *kubectlCli) Apply(obj *kubectlObject) error {
+	cmdStr := fmt.Sprintf("kubectl --namespace=%s --context=%s apply -ojson -f -", obj.Metadata.Namespace, k.context)
+	stdout, _, err := executeCmd(cmdStr, obj.yaml)
 	if err != nil {
 		return err
 	}
-	cmdStr := fmt.Sprintf("kubectl --context=%s apply --prune -l %s=%s -f -", cfg.context, KUBECTL_APPLY_PRUNELABEL, pruneId)
-	_, _, err = executeCmd(cmdStr, cmdInput)
-	return err
+	return json.Unmarshal([]byte(stdout), obj)
 }
 
 // delete all objects in the provided yaml
-func (cfg *kubectlCli) Delete(yamlObject string) error {
-	cmdStr := fmt.Sprintf("kubectl --context=%s delete -f -", cfg.context)
+func (k *kubectlCli) Delete(yamlObject string) error {
+	cmdStr := fmt.Sprintf("kubectl --context=%s delete -f -", k.context)
 	_, _, err := executeCmd(cmdStr, yamlObject)
 	return err
 }
 
-// Get exported objects in yaml format
-func (cfg *kubectlCli) Get(yamlObject string) (string, error) {
-	cmdStr := fmt.Sprintf("kubectl --context=%s get --export -oyaml -f -", cfg.context)
-	stdout, _, err := executeCmd(cmdStr, yamlObject)
-	return stdout, err
+func (k *kubectlCli) NewObject(yamlStr string) (*kubectlObject, error) {
+	// todo: validation (single object, has name/kind/etc)
+
+	obj := &kubectlObject{yaml: yamlStr}
+	yaml.Unmarshal([]byte(yamlStr), obj)
+	apiGroup := ""
+	parts := strings.Split(obj.APIVersion, "/")
+	if len(parts) > 1 {
+		apiGroup = parts[0]
+	}
+	for _, r := range k.apiResources {
+		if r.apiGroup == apiGroup && r.kind == obj.Kind {
+			obj.apiResource = &r
+			break
+		}
+	}
+	if obj.apiResource == nil {
+		return nil, errors.New(fmt.Sprintf("Could not find resource kind '%s' in apiGroup '%s'", obj.Kind, apiGroup))
+	}
+	if obj.Metadata.Namespace == "" && obj.apiResource.namespaced {
+		obj.Metadata.Namespace = k.defaultNamespace
+	}
+	if ! obj.apiResource.namespaced {
+		obj.Metadata.Namespace = ""
+	}
+
+	return obj, nil
+}
+
+func (k *kubectlCli) GetObject(resourceId string) (*kubectlObject, error) {
+	parts := strings.Split(resourceId, "/")
+	namespace := parts[0]
+	kind := parts[1]
+	name := parts[2]
+	cmdStr := fmt.Sprintf("kubectl --namespace=%s --context=%s get %s %s -ojson", namespace, k.context, kind, name)
+	stdout, _, err := executeCmd(cmdStr, "")
+	if err != nil {
+		return nil, err
+	}
+	return k.NewObject(stdout)
+}
+
+func (k *kubectlCli) ObjectExists(resourceId string) (bool, error) {
+	parts := strings.Split(resourceId, "/")
+	namespace := parts[0]
+	kind := parts[1]
+	name := parts[2]
+
+	stdout, _, err := executeCmd(fmt.Sprintf("kubectl --context=%s --namespace=%s get %s -oname", k.context, namespace, kind), "")
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasSuffix(line, "/"+name) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (o kubectlObject) ResourceId() string {
+	kind := strings.ToLower(o.Kind)
+	// ResourceId is '[namespace]/kind/name'
+	return fmt.Sprintf("%s/%s/%s", o.Metadata.Namespace, kind, o.Metadata.Name)
+}
+
+func (o kubectlObject) LastAppliedConfigurationHash() string {
+	// todo: make sure the 'lastappliedconfiguration' json has object keys sorted (to reduce diff noise)
+	h := sha256.New()
+	h.Write([]byte(o.Metadata.Annotations.KubectlKubernetesIoLastAppliedConfiguration))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // handy wrapper to execute a CLI command and return the result
@@ -54,33 +176,12 @@ func executeCmd(cmdStr string, stdin string) (stdout string, stderr string, err 
 	stdout = outBuf.String()
 	stderr = errBuf.String()
 	if err != nil {
-		err = errors.New(err.Error() + stderr + stdout)
+		_, file, line, _ := runtime.Caller(1)
+		msg := fmt.Sprintf("%s:%d] ", file, line)
+		err = errors.New(msg + stderr + stdout)
 		glog.ErrorDepth(1, err)
 	} else {
 		glog.V(4).Infof("Exec success: %s\n%s%s", cmdStr, stdout, stderr)
 	}
 	return
-}
-
-// merge the prune label into the provided yaml
-func mergePrunelabel(yamlStr string, labelValue string) (string, error) {
-	parsed := make(map[string]interface{})
-	if err := yaml.Unmarshal([]byte(yamlStr), &parsed); err != nil {
-		return "", err
-	}
-	metadataKey, _ := parsed["metadata"]
-	metadata := metadataKey.(map[interface{}]interface{})
-	if labelsKey, hasLabels := metadata["labels"]; hasLabels {
-		labels := labelsKey.(map[interface{}]interface{})
-		labels[KUBECTL_APPLY_PRUNELABEL] = labelValue
-	} else {
-		metadata["labels"] = map[string]string{
-			KUBECTL_APPLY_PRUNELABEL: labelValue,
-		}
-	}
-	mergedYaml, err := yaml.Marshal(parsed)
-	if err != nil {
-		return "", err
-	}
-	return string(mergedYaml), nil
 }

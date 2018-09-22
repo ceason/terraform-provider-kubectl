@@ -2,7 +2,8 @@ package main
 
 import (
 	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/satori/go.uuid"
+	"errors"
+	"fmt"
 )
 
 func resourceGenericObject() *schema.Resource {
@@ -12,12 +13,75 @@ func resourceGenericObject() *schema.Resource {
 				Type:     schema.TypeString,
 				Required: true,
 			},
+			"last_applied_configuration": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"name": {
+				Type:     schema.TypeString,
+				Computed: true,
+				ForceNew: true,
+			},
+			"namespace": {
+				Type:     schema.TypeString,
+				Computed: true,
+				ForceNew: true,
+			},
+			"kind": {
+				Type:     schema.TypeString,
+				Computed: true,
+				ForceNew: true,
+			},
 		},
-		Create: resourceGenericObjectCreate,
-		Read:   resourceGenericObjectRead,
-		Update: resourceGenericObjectUpdate,
-		Delete: resourceGenericObjectDelete,
+		Create:        resourceGenericObjectCreate,
+		Read:          resourceGenericObjectRead,
+		Update:        resourceGenericObjectUpdate,
+		Delete:        resourceGenericObjectDelete,
+		CustomizeDiff: resourceGenericObjectDiff,
+		Exists:        resourceGenericObjectExists,
 	}
+}
+
+func resourceGenericObjectExists(d *schema.ResourceData, provider interface{}) (bool, error) {
+	k := provider.(*providerConfig)
+	return k.ObjectExists(d.Id())
+}
+
+/**
+- recalculate the resource name/namespace/kind(/apigroup?)
+- update the 'last_applied_configuration'
+*/
+func resourceGenericObjectRead(d *schema.ResourceData, provider interface{}) error {
+	p := provider.(*providerConfig)
+	obj, err := p.GetObject(d.Id())
+	if err != nil {
+		return err
+	}
+	if d.Get("last_applied_configuration").(string) != obj.LastAppliedConfigurationHash() {
+		d.Set("last_applied_configuration", obj.LastAppliedConfigurationHash())
+	}
+	return nil
+}
+
+func resourceGenericObjectDiff(d *schema.ResourceDiff, provider interface{}) error {
+	p := provider.(*providerConfig)
+	if d.HasChange("yaml") {
+		// figure out if immutable things have changed
+		obj, err := p.NewObject(d.Get("yaml").(string))
+		if err != nil {
+			return err
+		}
+		if obj.Metadata.Name != d.Get("name").(string) {
+			d.SetNew("name", obj.Metadata.Name)
+		}
+		if obj.Metadata.Namespace != d.Get("namespace").(string) {
+			d.SetNew("namespace", obj.Metadata.Namespace)
+		}
+		if obj.Kind != d.Get("kind").(string) {
+			d.SetNew("kind", obj.Kind)
+		}
+	}
+	return nil
 }
 
 /*
@@ -26,31 +90,47 @@ func resourceGenericObject() *schema.Resource {
 */
 func resourceGenericObjectCreate(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
-	id := uuid.NewV4().String()
-	d.SetId(id)
-	return p.kubectl.Apply(d.Get("yaml").(string), id)
-}
+	obj, err := p.NewObject(d.Get("yaml").(string))
+	if err != nil {
+		return err
+	}
+	exists, err := p.ObjectExists(obj.ResourceId())
+	if err != nil {
+		return err
+	}
+	if exists {
+		return errors.New(fmt.Sprintf("Object already exists. Try importing it with: terraform import <resource_name> %s", obj.ResourceId()))
+	}
+	err = p.Apply(obj)
+	if err != nil {
+		return err
+	}
+	d.Set("last_applied_configuration", obj.LastAppliedConfigurationHash())
+	d.Set("name", obj.Metadata.Name)
+	d.Set("namespace", obj.Metadata.Namespace)
+	d.Set("kind", obj.Kind)
+	d.SetId(obj.ResourceId())
 
-/**
-- noop for now
-- pretty sure this is unnecessary for min functionality because `apply` handles all of the state transition logic for us
-*/
-func resourceGenericObjectRead(d *schema.ResourceData, provider interface{}) error {
+	// todo: detect when we create a CRD and add it to the provider's "apiResources" (so usages will know if the resource is namespaced or not)
+
 	return nil
 }
 
 // Calls kubectl apply
 func resourceGenericObjectUpdate(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
-	d.Partial(true)
-	if d.HasChange("yaml") {
-		err := p.kubectl.Apply(d.Get("yaml").(string), d.Id())
+
+	if d.HasChange("yaml") || d.HasChange("last_applied_configuration") {
+		obj, err := p.NewObject(d.Get("yaml").(string))
 		if err != nil {
 			return err
 		}
-		d.SetPartial("yaml")
+		err = p.Apply(obj)
+		if err != nil {
+			return err
+		}
+		d.Set("last_applied_configuration", obj.LastAppliedConfigurationHash())
 	}
-	d.Partial(false)
 	return nil
 }
 
@@ -58,5 +138,5 @@ func resourceGenericObjectUpdate(d *schema.ResourceData, provider interface{}) e
 func resourceGenericObjectDelete(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
 	yamlStr := d.Get("yaml").(string)
-	return p.kubectl.Delete(yamlStr)
+	return p.Delete(yamlStr)
 }

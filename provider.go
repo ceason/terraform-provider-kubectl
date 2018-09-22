@@ -6,7 +6,7 @@ import (
 )
 
 type providerConfig struct {
-	kubectl *kubectlCli
+	*kubectlCli
 }
 
 func Provider() *schema.Provider {
@@ -26,6 +26,10 @@ func Provider() *schema.Provider {
 					return stdout, err
 				},
 			},
+			"namespace": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
 		},
 		ConfigureFunc: configureProvider,
 		ResourcesMap: map[string]*schema.Resource{
@@ -37,10 +41,10 @@ func Provider() *schema.Provider {
 func configureProvider(d *schema.ResourceData) (interface{}, error) {
 	// todo: validate this context exists in kubectl config
 	ctx := d.Get("context").(string)
-	cfg := &providerConfig{
-		kubectl: &kubectlCli{
-			context: ctx,
-		},
+	namespace := d.Get("namespace").(string)
+	kubectl, err := NewKubectlCli(ctx, namespace)
+	if err != nil {
+		return nil, err
 	}
-	return cfg, nil
+	return &providerConfig{kubectl}, nil
 }
