@@ -8,7 +8,7 @@ git_repository(
 
 git_repository(
     name = "rules_terraform",
-    commit = "6e7ee391054409f18cb3cc2ff37645923c48ecb4",
+    commit = "4414e03f4ea30ed7b0251c1ef95a7aaaf14d7624",
     remote = "git@github.com:ceason/rules_terraform.git",
 )
 
