@@ -55,7 +55,7 @@ func NewKubectlCli(context string, defaultNamespace string) (*kubectlCli, error)
 		defaultNamespace: defaultNamespace,
 	}
 	if client.defaultNamespace == "" {
-		stdout, _, err := executeCmd(fmt.Sprintf("kubectl --context=%s config view --minify --merge \"-ogo-template={{(index .contexts 0).context.namespace}}\" ", context), "")
+		stdout, _, err := executeArgs("kubectl", "--context=" + context, "config", "view", "--minify", "--merge", "-ogo-template={{(index .contexts 0).context.namespace}}")
 		if err != nil {
 			return nil, err
 		}
@@ -134,12 +134,13 @@ func (k *kubectlCli) GetObject(resourceId string) (*kubectlObject, error) {
 }
 
 func (k *kubectlCli) ObjectExists(resourceId string) (bool, error) {
+	//return false, errors.New(resourceId)
 	parts := strings.Split(resourceId, "/")
 	namespace := parts[0]
 	kind := parts[1]
 	name := parts[2]
 
-	stdout, _, err := executeCmd(fmt.Sprintf("kubectl --context=%s --namespace=%s get %s -oname", k.context, namespace, kind), "")
+	stdout, _, err := executeCmd(fmt.Sprintf("kubectl get --context=%s --namespace=%s %s -oname", k.context, namespace, kind), "")
 	if err != nil {
 		return false, err
 	}
@@ -182,6 +183,22 @@ func executeCmd(cmdStr string, stdin string) (stdout string, stderr string, err 
 		glog.ErrorDepth(1, err)
 	} else {
 		glog.V(4).Infof("Exec success: %s\n%s%s", cmdStr, stdout, stderr)
+	}
+	return
+}
+
+func executeArgs(args... string) (stdout string, stderr string, err error) {
+	cmd := exec.Command(args[0], args[1:]...)
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	stdout = outBuf.String()
+	stderr = errBuf.String()
+	if err != nil {
+		_, file, line, _ := runtime.Caller(1)
+		msg := fmt.Sprintf("%s:%d] ", file, line)
+		err = errors.New(msg + stderr + stdout)
 	}
 	return
 }
