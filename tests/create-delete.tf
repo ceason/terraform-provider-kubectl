@@ -6,7 +6,7 @@ resource random_string uniqifier {
 
 provider kubectl {
 
-  namespace = "asdfblah"
+  namespace = "default"
 }
 
 provider kubernetes {
