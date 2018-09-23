@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
 load("@bazel_gazelle//:def.bzl", "gazelle")
 load("@rules_terraform//terraform:def.bzl", "terraform_plugin")
 
@@ -32,14 +32,6 @@ go_binary(
     name = "terraform-provider-kubectl",
     embed = [":go_default_library"],
     visibility = ["//visibility:public"],
-)
-
-go_test(
-    name = "go_default_test",
-    srcs = ["kubectl_cli_test.go"],
-    data = glob(["testdata/**"]),
-    embed = [":go_default_library"],
-    deps = ["//vendor/github.com/smartystreets/goconvey/convey:go_default_library"],
 )
 
 go_binary(
