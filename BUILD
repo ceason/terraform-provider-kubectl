@@ -10,10 +10,11 @@ gazelle(
 go_library(
     name = "go_default_library",
     srcs = [
+        "data_source_kubectl_namespace.go",
         "kubectl_cli.go",
         "main.go",
         "provider.go",
-        "resource_generic_object.go",
+        "resource_kubectl_generic_object.go",
         "types.go",
     ],
     importpath = "github.com/ceason/terraform-provider-kubectl",

@@ -4,28 +4,31 @@ resource random_string uniqifier {
   upper   = false
 }
 
+data kubectl_namespace current {}
+
 provider kubectl {
-
-//  namespace = "default"
-}
-
-provider kubernetes {
-  cluster_ca_certificate = ""
-  host                   = ""
-  token                  = ""
-  client_certificate     = ""
-  client_key             = ""
+  namespace = "kube-public"
 }
 
 resource kubernetes_config_map test_configmap {
   metadata {
-    name = "createdelete-test-configmap-${random_string.uniqifier.result}"
+    name      = "createdelete-test-configmap-${random_string.uniqifier.result}"
+    namespace = "${data.kubectl_namespace.current.id}"
   }
   data {
-    TEST_ASDF = "1234"
+    TEST_ASDF.X = "1234"
+    KEY_NUM2    = "asdfX"
   }
 }
 
+resource local_file vars {
+  filename = "test_vars.sh"
+  content = <<EOF
+TEST_SVCACCT=test-create-delete-${random_string.uniqifier.result}
+TEST_CONFIGMAP=createdelete-test-configmap-${random_string.uniqifier.result}
+TEST_NAMESPACE=${data.kubectl_namespace.current.id}
+EOF
+}
 
 resource kubectl_generic_object test_svcacct {
   // language=yaml
@@ -33,7 +36,7 @@ resource kubectl_generic_object test_svcacct {
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: test-create-delete
+  name: test-create-delete-${random_string.uniqifier.result}
 
 EOF
 }

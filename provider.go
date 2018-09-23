@@ -33,7 +33,10 @@ func Provider() *schema.Provider {
 		},
 		ConfigureFunc: configureProvider,
 		ResourcesMap: map[string]*schema.Resource{
-			"kubectl_generic_object": resourceGenericObject(),
+			"kubectl_generic_object": resourceKubectlGenericObject(),
+		},
+		DataSourcesMap: map[string]*schema.Resource{
+			"kubectl_namespace": dataSourceKubectlNamespace(),
 		},
 	}
 }

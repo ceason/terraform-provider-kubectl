@@ -8,7 +8,7 @@ git_repository(
 
 git_repository(
     name = "rules_terraform",
-    commit = "295e923397dc0dc7f0916e5c7f38c98c06af6e8e",
+    commit = "6e7ee391054409f18cb3cc2ff37645923c48ecb4",
     remote = "git@github.com:ceason/rules_terraform.git",
 )
 
@@ -26,17 +26,15 @@ git_repository(
 
 git_repository(
     name = "io_bazel_rules_go",
-    remote = "https://github.com/bazelbuild/rules_go.git",
     commit = "f8c9f2c6336536147458aaccbd1becf5cc80232a",
+    remote = "https://github.com/bazelbuild/rules_go.git",
 )
-
 
 git_repository(
     name = "bazel_gazelle",
-    remote = "https://github.com/bazelbuild/bazel-gazelle.git",
     commit = "993d887662ad83bb60b9ba1570270d4afcda91a1",
+    remote = "https://github.com/bazelbuild/bazel-gazelle.git",
 )
-
 
 load("@io_bazel_rules_docker//container:container.bzl", "repositories")
 

@@ -85,9 +85,9 @@ func (k *kubectlCli) Apply(obj *kubectlObject) error {
 }
 
 // delete all objects in the provided yaml
-func (k *kubectlCli) Delete(yamlObject string) error {
-	cmdStr := fmt.Sprintf("kubectl --context=%s delete -f -", k.context)
-	_, _, err := executeCmd(cmdStr, yamlObject)
+func (k *kubectlCli) Delete(namespace, kind, name string) error {
+	cmdStr := fmt.Sprintf("kubectl --context=%s --namespace=%s delete %s %s", k.context, namespace, kind, name)
+	_, _, err := executeCmd(cmdStr, "")
 	return err
 }
 
@@ -135,10 +135,10 @@ func (k *kubectlCli) GetObject(resourceId string) (*kubectlObject, error) {
 
 func (k *kubectlCli) ObjectExists(resourceId string) (bool, error) {
 	//return false, errors.New(resourceId)
-	parts := strings.Split(resourceId, "/")
-	namespace := parts[0]
-	kind := parts[1]
-	name := parts[2]
+	namespace, kind, name, err := resourceIdParts(resourceId)
+	if err != nil {
+		panic(err)
+	}
 
 	stdout, _, err := executeCmd(fmt.Sprintf("kubectl get --context=%s --namespace=%s %s -oname", k.context, namespace, kind), "")
 	if err != nil {
@@ -154,8 +154,23 @@ func (k *kubectlCli) ObjectExists(resourceId string) (bool, error) {
 
 func (o kubectlObject) ResourceId() string {
 	kind := strings.ToLower(o.Kind)
+	if o.ApiGroup() != "" {
+		kind = fmt.Sprintf("%s.%s", kind, o.ApiGroup())
+	}
 	// ResourceId is '[namespace]/kind/name'
 	return fmt.Sprintf("%s/%s/%s", o.Metadata.Namespace, kind, o.Metadata.Name)
+}
+
+func (o kubectlObject) FullKind() string {
+	kind := strings.ToLower(o.Kind)
+	if o.apiResource.apiGroup != "" {
+		kind = fmt.Sprintf("%s.%s", kind, o.apiResource.apiGroup)
+	}
+	return kind
+}
+
+func (o kubectlObject) ApiGroup() string {
+	return o.apiResource.apiGroup
 }
 
 func (o kubectlObject) LastAppliedConfigurationHash() string {

@@ -4,9 +4,10 @@ import (
 	"github.com/hashicorp/terraform/helper/schema"
 	"errors"
 	"fmt"
+	"strings"
 )
 
-func resourceGenericObject() *schema.Resource {
+func resourceKubectlGenericObject() *schema.Resource {
 	return &schema.Resource{
 		Schema: map[string]*schema.Schema{
 			"yaml": {
@@ -32,17 +33,26 @@ func resourceGenericObject() *schema.Resource {
 				Computed: true,
 				ForceNew: true,
 			},
+			"api_group": {
+				Type:     schema.TypeString,
+				Computed: true,
+				ForceNew: true,
+			},
 		},
-		Create:        resourceGenericObjectCreate,
-		Read:          resourceGenericObjectRead,
-		Update:        resourceGenericObjectUpdate,
-		Delete:        resourceGenericObjectDelete,
-		CustomizeDiff: resourceGenericObjectDiff,
-		Exists:        resourceGenericObjectExists,
+		Create:        resourceKubectlGenericObjectCreate,
+		Read:          resourceKubectlGenericObjectRead,
+		Update:        resourceKubectlGenericObjectUpdate,
+		Delete:        resourceKubectlGenericObjectDelete,
+		CustomizeDiff: resourceKubectlGenericObjectDiff,
+		Exists:        resourceKubectlGenericObjectExists,
+		Importer: &schema.ResourceImporter{
+			State: resourceKubectlGenericObjectImportState,
+		},
+
 	}
 }
 
-func resourceGenericObjectExists(d *schema.ResourceData, provider interface{}) (bool, error) {
+func resourceKubectlGenericObjectExists(d *schema.ResourceData, provider interface{}) (bool, error) {
 	k := provider.(*providerConfig)
 	return k.ObjectExists(d.Id())
 }
@@ -51,7 +61,7 @@ func resourceGenericObjectExists(d *schema.ResourceData, provider interface{}) (
 - recalculate the resource name/namespace/kind(/apigroup?)
 - update the 'last_applied_configuration'
 */
-func resourceGenericObjectRead(d *schema.ResourceData, provider interface{}) error {
+func resourceKubectlGenericObjectRead(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
 	obj, err := p.GetObject(d.Id())
 	if err != nil {
@@ -63,7 +73,7 @@ func resourceGenericObjectRead(d *schema.ResourceData, provider interface{}) err
 	return nil
 }
 
-func resourceGenericObjectDiff(d *schema.ResourceDiff, provider interface{}) error {
+func resourceKubectlGenericObjectDiff(d *schema.ResourceDiff, provider interface{}) error {
 	p := provider.(*providerConfig)
 	if d.HasChange("yaml") {
 		// figure out if immutable things have changed
@@ -80,6 +90,9 @@ func resourceGenericObjectDiff(d *schema.ResourceDiff, provider interface{}) err
 		if obj.Kind != d.Get("kind").(string) {
 			d.SetNew("kind", obj.Kind)
 		}
+		if obj.ApiGroup() != d.Get("api_group").(string) {
+			d.SetNew("api_group", obj.ApiGroup())
+		}
 	}
 	return nil
 }
@@ -88,12 +101,15 @@ func resourceGenericObjectDiff(d *schema.ResourceDiff, provider interface{}) err
 - Generates and sets `id` globally unique id
 - Calls kubectl apply
 */
-func resourceGenericObjectCreate(d *schema.ResourceData, provider interface{}) error {
+func resourceKubectlGenericObjectCreate(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
 	obj, err := p.NewObject(d.Get("yaml").(string))
 	if err != nil {
 		return err
 	}
+
+	// Temporarily ignoring existing objects to preserve existing behavior
+	/*
 	exists, err := p.ObjectExists(obj.ResourceId())
 	if err != nil {
 		return err
@@ -101,6 +117,7 @@ func resourceGenericObjectCreate(d *schema.ResourceData, provider interface{}) e
 	if exists {
 		return errors.New(fmt.Sprintf("Object already exists. Try importing it with: terraform import <resource_name> %s", obj.ResourceId()))
 	}
+	// */
 	err = p.Apply(obj)
 	if err != nil {
 		return err
@@ -109,6 +126,7 @@ func resourceGenericObjectCreate(d *schema.ResourceData, provider interface{}) e
 	d.Set("name", obj.Metadata.Name)
 	d.Set("namespace", obj.Metadata.Namespace)
 	d.Set("kind", obj.Kind)
+	d.Set("api_group", obj.ApiGroup())
 	d.SetId(obj.ResourceId())
 
 	// todo: detect when we create a CRD and add it to the provider's "apiResources" (so usages will know if the resource is namespaced or not)
@@ -117,7 +135,7 @@ func resourceGenericObjectCreate(d *schema.ResourceData, provider interface{}) e
 }
 
 // Calls kubectl apply
-func resourceGenericObjectUpdate(d *schema.ResourceData, provider interface{}) error {
+func resourceKubectlGenericObjectUpdate(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
 
 	if d.HasChange("yaml") || d.HasChange("last_applied_configuration") {
@@ -135,8 +153,42 @@ func resourceGenericObjectUpdate(d *schema.ResourceData, provider interface{}) e
 }
 
 // Calls kubectl delete
-func resourceGenericObjectDelete(d *schema.ResourceData, provider interface{}) error {
+func resourceKubectlGenericObjectDelete(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
-	yamlStr := d.Get("yaml").(string)
-	return p.Delete(yamlStr)
+	namespace := d.Get("namespace").(string)
+	kind := d.Get("kind").(string)
+	name := d.Get("name").(string)
+	return p.Delete(namespace, kind, name)
+}
+
+func resourceIdParts(resourceId string) (namespace, kind, name string, err error) {
+	parts := strings.Split(resourceId, "/")
+	if len(parts) != 3 {
+		err = errors.New(fmt.Sprintf("ResourceId should have exactly 3 parts: '%s'", resourceId))
+	}
+	namespace = parts[0]
+	kind = parts[1]
+	name = parts[2]
+	return
+}
+
+
+func resourceKubectlGenericObjectImportState(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+	p := meta.(*providerConfig)
+
+	results := make([]*schema.ResourceData, 1)
+	results[0] = d
+
+	obj, err := p.GetObject(d.Id())
+	if err != nil {
+		return nil, err
+	}
+
+	d.Set("last_applied_configuration", obj.LastAppliedConfigurationHash())
+	d.Set("name", obj.Metadata.Name)
+	d.Set("namespace", obj.Metadata.Namespace)
+	d.Set("kind", obj.Kind)
+	d.Set("api_group", obj.ApiGroup())
+
+	return results, nil
 }
