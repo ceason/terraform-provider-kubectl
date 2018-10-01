@@ -5,18 +5,30 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"strconv"
+)
+
+const (
+	PropertymapFieldname = "z"
 )
 
 func resourceKubectlGenericObject() *schema.Resource {
 	return &schema.Resource{
 		Schema: map[string]*schema.Schema{
 			"yaml": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:      schema.TypeString,
+				Required:  true,
+				Sensitive: true,
 			},
-			"last_applied_configuration": {
+			"api_version": {
 				Type:     schema.TypeString,
 				Computed: true,
+				ForceNew: true,
+			},
+			"kind": {
+				Type:     schema.TypeString,
+				Computed: true,
+				ForceNew: true,
 			},
 			"name": {
 				Type:     schema.TypeString,
@@ -28,15 +40,11 @@ func resourceKubectlGenericObject() *schema.Resource {
 				Computed: true,
 				ForceNew: true,
 			},
-			"kind": {
-				Type:     schema.TypeString,
-				Computed: true,
-				ForceNew: true,
-			},
-			"api_group": {
-				Type:     schema.TypeString,
-				Computed: true,
-				ForceNew: true,
+			PropertymapFieldname: {
+				Type:        schema.TypeMap,
+				Description: "Parsed object fields to make 'terraform plan' output more meaningful",
+				Computed:    true,
+				Elem:        &schema.Schema{Type: schema.TypeString},
 			},
 		},
 		Create:        resourceKubectlGenericObjectCreate,
@@ -48,7 +56,6 @@ func resourceKubectlGenericObject() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			State: resourceKubectlGenericObjectImportState,
 		},
-
 	}
 }
 
@@ -58,42 +65,53 @@ func resourceKubectlGenericObjectExists(d *schema.ResourceData, provider interfa
 }
 
 /**
-- recalculate the resource name/namespace/kind(/apigroup?)
-- update the 'last_applied_configuration'
+- todo: update the object's "property map", filtered by which keys are already set
 */
 func resourceKubectlGenericObjectRead(d *schema.ResourceData, provider interface{}) error {
+	/*
 	p := provider.(*providerConfig)
 	obj, err := p.GetObject(d.Id())
 	if err != nil {
 		return err
 	}
-	if d.Get("last_applied_configuration").(string) != obj.LastAppliedConfigurationHash() {
-		d.Set("last_applied_configuration", obj.LastAppliedConfigurationHash())
+	props := obj.Properties()
+	existing := d.Get(PropertymapFieldname).(map[string]interface{})
+	//return errors.New(fmt.Sprintf("%v", props))
+	if existing == nil || !reflect.DeepEqual(props, existing) {
+		d.Set(PropertymapFieldname, props)
 	}
+	//*/
 	return nil
 }
 
 func resourceKubectlGenericObjectDiff(d *schema.ResourceDiff, provider interface{}) error {
 	p := provider.(*providerConfig)
-	if d.HasChange("yaml") {
-		// figure out if immutable things have changed
-		obj, err := p.NewObject(d.Get("yaml").(string))
+
+	if !d.NewValueKnown("yaml") {
+		return errors.New("Could not determine value for 'yaml' field at plan-time. A common cause of this error is an interpolation which depends on another resource's output (recommendation is to avoid this type of interpolation) ")
+	}
+
+	// figure out if calculated fields have changed
+	if d.HasChange("yaml") || d.Id() != "" {
+		cfg, err := p.NewObjectConfig(d.Get("yaml").(string))
 		if err != nil {
 			return err
 		}
-		if obj.Metadata.Name != d.Get("name").(string) {
-			d.SetNew("name", obj.Metadata.Name)
+		if cfg.ApiVersion != d.Get("api_version").(string) {
+			d.SetNew("api_version", cfg.ApiVersion)
 		}
-		if obj.Metadata.Namespace != d.Get("namespace").(string) {
-			d.SetNew("namespace", obj.Metadata.Namespace)
+		if cfg.Kind != d.Get("kind").(string) {
+			d.SetNew("kind", cfg.FullKind())
 		}
-		if obj.Kind != d.Get("kind").(string) {
-			d.SetNew("kind", obj.Kind)
+		if cfg.Metadata.Name != d.Get("name").(string) {
+			d.SetNew("name", cfg.Metadata.Name)
 		}
-		if obj.ApiGroup() != d.Get("api_group").(string) {
-			d.SetNew("api_group", obj.ApiGroup())
+		if cfg.Metadata.Namespace != d.Get("namespace").(string) {
+			d.SetNew("namespace", cfg.Metadata.Namespace)
 		}
+		d.SetNew(PropertymapFieldname, cfg.Properties())
 	}
+
 	return nil
 }
 
@@ -103,7 +121,7 @@ func resourceKubectlGenericObjectDiff(d *schema.ResourceDiff, provider interface
 */
 func resourceKubectlGenericObjectCreate(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
-	obj, err := p.NewObject(d.Get("yaml").(string))
+	cfg, err := p.NewObjectConfig(d.Get("yaml").(string))
 	if err != nil {
 		return err
 	}
@@ -118,16 +136,16 @@ func resourceKubectlGenericObjectCreate(d *schema.ResourceData, provider interfa
 		return errors.New(fmt.Sprintf("Object already exists. Try importing it with: terraform import <resource_name> %s", obj.ResourceId()))
 	}
 	// */
-	err = p.Apply(obj)
+	obj, err := p.Apply(cfg, false)
 	if err != nil {
 		return err
 	}
-	d.Set("last_applied_configuration", obj.LastAppliedConfigurationHash())
 	d.Set("name", obj.Metadata.Name)
 	d.Set("namespace", obj.Metadata.Namespace)
 	d.Set("kind", obj.Kind)
-	d.Set("api_group", obj.ApiGroup())
-	d.SetId(obj.ResourceId())
+	d.Set("api_version", obj.ApiVersion)
+	d.Set(PropertymapFieldname, cfg.Properties())
+	d.SetId(cfg.ResourceId())
 
 	// todo: detect when we create a CRD and add it to the provider's "apiResources" (so usages will know if the resource is namespaced or not)
 
@@ -138,16 +156,17 @@ func resourceKubectlGenericObjectCreate(d *schema.ResourceData, provider interfa
 func resourceKubectlGenericObjectUpdate(d *schema.ResourceData, provider interface{}) error {
 	p := provider.(*providerConfig)
 
-	if d.HasChange("yaml") || d.HasChange("last_applied_configuration") {
-		obj, err := p.NewObject(d.Get("yaml").(string))
+	// we check just this field because it's our primary way of communicating the diff to the user (ie we
+	// only want to do changes if we've actually told the user what's changing)
+	if d.HasChange(PropertymapFieldname) {
+		obj, err := p.NewObjectConfig(d.Get("yaml").(string))
 		if err != nil {
 			return err
 		}
-		err = p.Apply(obj)
+		_, err = p.Apply(obj, false)
 		if err != nil {
 			return err
 		}
-		d.Set("last_applied_configuration", obj.LastAppliedConfigurationHash())
 	}
 	return nil
 }
@@ -172,7 +191,6 @@ func resourceIdParts(resourceId string) (namespace, kind, name string, err error
 	return
 }
 
-
 func resourceKubectlGenericObjectImportState(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	p := meta.(*providerConfig)
 
@@ -184,11 +202,83 @@ func resourceKubectlGenericObjectImportState(d *schema.ResourceData, meta interf
 		return nil, err
 	}
 
-	d.Set("last_applied_configuration", obj.LastAppliedConfigurationHash())
 	d.Set("name", obj.Metadata.Name)
 	d.Set("namespace", obj.Metadata.Namespace)
 	d.Set("kind", obj.Kind)
-	d.Set("api_group", obj.ApiGroup())
+	d.Set("api_version", obj.ApiVersion)
+	d.Set(PropertymapFieldname, obj.Properties())
 
 	return results, nil
+}
+
+// Find all leaf values in the provided object, returning a map of those values and their paths
+func leafValues(pathPrefix string, obj interface{}) map[string]string {
+	out := make(map[string]string)
+
+	// exclude paths with these prefixes from the output
+	excludedPrefixes := []string{
+		"apiVersion",
+		"kind",
+		"status.",
+		"metadata.name",
+		"metadata.namespace",
+		"metadata.annotations[kubectl.kubernetes.io/last-applied-configuration]",
+		"metadata.generation",
+		"metadata.ownerReferences",
+		"metadata.resourceVersion",
+	}
+	isExcluded := func(path string) bool {
+		for _, prefix := range excludedPrefixes {
+			if strings.HasPrefix(path, prefix) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// delimit path parts with '.' (unless the path part contains '.')
+	pathFmt := func(parent, current string) string {
+		var suffix string
+		if strings.Contains(current, ".") {
+			suffix = fmt.Sprintf("[%s]", current)
+		} else if parent == "" {
+			suffix = current
+		} else {
+			suffix = "." + current
+		}
+		return parent + suffix
+	}
+
+	// traverse: lists, maps,
+	// append: scalars
+	var walkNode func(string, interface{})
+	walkNode = func(path string, node interface{}) {
+		if isExcluded(path) {
+			// if path is excluded we don't even traverse tree
+			return
+		}
+		switch v := node.(type) {
+		case int:
+			out[path] = strconv.Itoa(v)
+		case bool:
+			out[path] = strconv.FormatBool(v)
+		case string:
+			out[path] = v
+		case map[interface{}]interface{}:
+			// walk all child paths
+			for key, value := range v {
+				walkNode(pathFmt(path, key.(string)), value)
+			}
+		case []interface{}:
+			for idx, value := range v {
+				walkNode(pathFmt(path, strconv.Itoa(idx)), value)
+			}
+		default:
+			panic(fmt.Sprintf("I don't know about type %T!\n", v))
+		}
+	}
+
+	walkNode(pathPrefix, obj)
+
+	return out
 }

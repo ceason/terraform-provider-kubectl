@@ -1,0 +1,16 @@
+metadata:
+  name: tf-test
+  annotations:
+    prometheus.io/scrape: "true"
+spec:
+  replicas: 4
+  template:
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: sidecar
+        args:
+        - echo
+        - Hello World
+      - name: server
+        args: [ "while true; do sleep 30; done" ]

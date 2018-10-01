@@ -18,6 +18,8 @@ terraform_integration_test(
     name = "create_delete_integration_test",
     size = "small",
     srctest = ":create_delete_test",
+    tags = [
+        #        "manual",
+    ],
     terraform_workspace = ":workspace",
-    tags = ["manual"],
 )

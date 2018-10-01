@@ -23,20 +23,31 @@ resource kubernetes_config_map test_configmap {
 
 resource local_file vars {
   filename = "test_vars.sh"
-  content = <<EOF
-TEST_SVCACCT=test-create-delete-${random_string.uniqifier.result}
+  content  = <<EOF
+TEST_SVCACCT=${local.test_svcacct}
 TEST_CONFIGMAP=createdelete-test-configmap-${random_string.uniqifier.result}
 TEST_NAMESPACE=${data.kubectl_namespace.current.id}
 EOF
 }
 
+
+variable "asdf" {
+  default = "something"
+}
+
+locals {
+  test_svcacct="test-create-delete-${var.asdf}"
+}
+
+
 resource kubectl_generic_object test_svcacct {
-  // language=yaml
+  #// language=yaml
   yaml = <<EOF
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: test-create-delete-${random_string.uniqifier.result}
-
+  name: ${local.test_svcacct}
+imagePullSecrets:
+- name: some-test-name
 EOF
 }

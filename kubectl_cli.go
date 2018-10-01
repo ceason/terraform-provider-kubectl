@@ -9,8 +9,6 @@ import (
 	"strings"
 	"strconv"
 	"gopkg.in/yaml.v2"
-	"crypto/sha256"
-	"encoding/json"
 	"runtime"
 )
 
@@ -55,7 +53,7 @@ func NewKubectlCli(context string, defaultNamespace string) (*kubectlCli, error)
 		defaultNamespace: defaultNamespace,
 	}
 	if client.defaultNamespace == "" {
-		stdout, _, err := executeArgs("kubectl", "--context=" + context, "config", "view", "--minify", "--merge", "-ogo-template={{(index .contexts 0).context.namespace}}")
+		stdout, _, err := executeArgs("kubectl", "--context="+context, "config", "view", "--minify", "--merge", "-ogo-template={{(index .contexts 0).context.namespace}}")
 		if err != nil {
 			return nil, err
 		}
@@ -75,13 +73,19 @@ type kubectlCli struct {
 	apiResources     []apiResource
 }
 
-func (k *kubectlCli) Apply(obj *kubectlObject) error {
-	cmdStr := fmt.Sprintf("kubectl --namespace=%s --context=%s apply -ojson -f -", obj.Metadata.Namespace, k.context)
-	stdout, _, err := executeCmd(cmdStr, obj.yaml)
+func (k *kubectlCli) Apply(cfg *kubectlObjectConfig, dryRun bool) (*kubectlObject, error) {
+	cmdStr := fmt.Sprintf("kubectl --namespace=%s --context=%s apply -ojson --dry-run=%s -f -", cfg.Metadata.Namespace, k.context, strconv.FormatBool(dryRun))
+	stdout, _, err := executeCmd(cmdStr, cfg.userProvidedYaml)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return json.Unmarshal([]byte(stdout), obj)
+
+	obj := &kubectlObject{rawYaml: stdout}
+	err = yaml.Unmarshal([]byte(stdout), obj)
+	if err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 // delete all objects in the provided yaml
@@ -91,13 +95,13 @@ func (k *kubectlCli) Delete(namespace, kind, name string) error {
 	return err
 }
 
-func (k *kubectlCli) NewObject(yamlStr string) (*kubectlObject, error) {
+func (k *kubectlCli) NewObjectConfig(yamlStr string) (*kubectlObjectConfig, error) {
 	// todo: validation (single object, has name/kind/etc)
 
-	obj := &kubectlObject{yaml: yamlStr}
+	obj := &kubectlObjectConfig{userProvidedYaml: yamlStr}
 	yaml.Unmarshal([]byte(yamlStr), obj)
 	apiGroup := ""
-	parts := strings.Split(obj.APIVersion, "/")
+	parts := strings.Split(obj.ApiVersion, "/")
 	if len(parts) > 1 {
 		apiGroup = parts[0]
 	}
@@ -108,7 +112,7 @@ func (k *kubectlCli) NewObject(yamlStr string) (*kubectlObject, error) {
 		}
 	}
 	if obj.apiResource == nil {
-		return nil, errors.New(fmt.Sprintf("Could not find resource kind '%s' in apiGroup '%s'", obj.Kind, apiGroup))
+		return nil, errors.New(fmt.Sprintf("Could not find resource kind '%s' in apiGroup '%s' (yaml='%s')", obj.Kind, apiGroup, yamlStr))
 	}
 	if obj.Metadata.Namespace == "" && obj.apiResource.namespaced {
 		obj.Metadata.Namespace = k.defaultNamespace
@@ -130,7 +134,12 @@ func (k *kubectlCli) GetObject(resourceId string) (*kubectlObject, error) {
 	if err != nil {
 		return nil, err
 	}
-	return k.NewObject(stdout)
+	obj := &kubectlObject{rawYaml: stdout}
+	err = yaml.Unmarshal([]byte(stdout), obj)
+	if err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func (k *kubectlCli) ObjectExists(resourceId string) (bool, error) {
@@ -152,16 +161,8 @@ func (k *kubectlCli) ObjectExists(resourceId string) (bool, error) {
 	return false, nil
 }
 
-func (o kubectlObject) ResourceId() string {
-	kind := strings.ToLower(o.Kind)
-	if o.ApiGroup() != "" {
-		kind = fmt.Sprintf("%s.%s", kind, o.ApiGroup())
-	}
-	// ResourceId is '[namespace]/kind/name'
-	return fmt.Sprintf("%s/%s/%s", o.Metadata.Namespace, kind, o.Metadata.Name)
-}
-
-func (o kubectlObject) FullKind() string {
+// Return the object's fully qualified 'kind' (ie suffixed with apiGroup if necessary)
+func (o kubectlObjectConfig) FullKind() string {
 	kind := strings.ToLower(o.Kind)
 	if o.apiResource.apiGroup != "" {
 		kind = fmt.Sprintf("%s.%s", kind, o.apiResource.apiGroup)
@@ -169,15 +170,33 @@ func (o kubectlObject) FullKind() string {
 	return kind
 }
 
-func (o kubectlObject) ApiGroup() string {
-	return o.apiResource.apiGroup
+func (o kubectlObjectConfig) ResourceId() string {
+	// ResourceId is '[namespace]/(full)kind/name'
+	return fmt.Sprintf("%s/%s/%s", o.Metadata.Namespace, o.FullKind(), o.Metadata.Name)
 }
 
-func (o kubectlObject) LastAppliedConfigurationHash() string {
-	// todo: make sure the 'lastappliedconfiguration' json has object keys sorted (to reduce diff noise)
-	h := sha256.New()
-	h.Write([]byte(o.Metadata.Annotations.KubectlKubernetesIoLastAppliedConfiguration))
-	return fmt.Sprintf("%x", h.Sum(nil))
+// Flat list of all object properties and their (stringified) values
+func (o kubectlObjectConfig) Properties() map[string]string {
+	raw := make(map[interface{}]interface{})
+	err := yaml.Unmarshal([]byte(o.userProvidedYaml), raw)
+	if err != nil {
+		// pretty certain this can't happen (as the yaml is already validated)
+		panic(err)
+	}
+	out := leafValues("", raw)
+	return out
+}
+
+// Flat list of all object properties and their (stringified) values
+func (o kubectlObject) Properties() map[string]string {
+	raw := make(map[interface{}]interface{})
+	err := yaml.Unmarshal([]byte(o.rawYaml), raw)
+	if err != nil {
+		// pretty certain this can't happen (as the yaml is already validated)
+		panic(err)
+	}
+	out := leafValues("", raw)
+	return out
 }
 
 // handy wrapper to execute a CLI command and return the result
@@ -202,7 +221,7 @@ func executeCmd(cmdStr string, stdin string) (stdout string, stderr string, err 
 	return
 }
 
-func executeArgs(args... string) (stdout string, stderr string, err error) {
+func executeArgs(args ... string) (stdout string, stderr string, err error) {
 	cmd := exec.Command(args[0], args[1:]...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf

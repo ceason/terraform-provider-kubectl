@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("@bazel_gazelle//:def.bzl", "gazelle")
 load("@rules_terraform//terraform:def.bzl", "terraform_plugin")
 
@@ -57,4 +57,13 @@ terraform_plugin(
     provider_name = "kubectl",
     version = "v0.3.0",
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "go_default_test",
+    size = "small",
+    srcs = ["resource_kubectl_generic_object_test.go"],
+    data = glob(["testdata/**"]),
+    embed = [":go_default_library"],
+    deps = ["//vendor/gopkg.in/yaml.v2:go_default_library"],
 )

@@ -7,17 +7,22 @@ type apiResource struct {
 	apiGroup   string
 }
 
-type kubectlObject struct {
-	APIVersion string `json:"apiVersion"`
+type kubectlObjectBase struct {
+	ApiVersion string `yaml:"apiVersion"`
 	Kind       string `json:"kind"`
 	Metadata struct {
 		Name      string `json:"name"`
 		Namespace string `json:"namespace"`
-		Annotations struct {
-			KubectlKubernetesIoLastAppliedConfiguration string `json:"kubectl.kubernetes.io/last-applied-configuration"`
-		} `json:"annotations"`
 	} `json:"metadata"`
-	yaml        string
-	apiResource *apiResource
 }
 
+type kubectlObject struct {
+	kubectlObjectBase `yaml:",inline"`
+	rawYaml string
+}
+
+type kubectlObjectConfig struct {
+	kubectlObjectBase `yaml:",inline"`
+	userProvidedYaml string
+	apiResource      *apiResource
+}
