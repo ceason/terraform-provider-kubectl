@@ -65,21 +65,26 @@ func resourceKubectlGenericObjectExists(d *schema.ResourceData, provider interfa
 }
 
 /**
-- todo: update the object's "property map", filtered by which keys are already set
+- update the object's "property map", filtered by which keys are already set
 */
 func resourceKubectlGenericObjectRead(d *schema.ResourceData, provider interface{}) error {
-	/*
+	///*
 	p := provider.(*providerConfig)
 	obj, err := p.GetObject(d.Id())
 	if err != nil {
 		return err
 	}
-	props := obj.Properties()
-	existing := d.Get(PropertymapFieldname).(map[string]interface{})
-	//return errors.New(fmt.Sprintf("%v", props))
-	if existing == nil || !reflect.DeepEqual(props, existing) {
-		d.Set(PropertymapFieldname, props)
+	actual := obj.Properties()
+	cached := d.Get(PropertymapFieldname).(map[string]interface{})
+	out := make(map[string]string)
+	for path, v := range cached {
+		if value, ok := actual[path]; ok {
+			out[path] = value
+		} else {
+			out[path] = v.(string)
+		}
 	}
+	d.Set(PropertymapFieldname, out)
 	//*/
 	return nil
 }
