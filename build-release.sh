@@ -26,7 +26,7 @@ git fetch --tags
 tag=$(git describe --tags --abbrev=0)
 major=$(cut -f1 -d'.' <<<"$tag")
 minor=$(cut -f2 -d'.' <<<"$tag")
-patch=$(cut -f3 -d'.' <<<"$tag")
+patch=$(git tag|grep "^$major.$minor."|sort --version-sort|tail -1|cut -f3 -d'.')
 tag="$major.$minor.$((patch+1))"
 
 rm -rf gh-release
