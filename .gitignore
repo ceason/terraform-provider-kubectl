@@ -23,3 +23,4 @@ terraform.tfstate.*
 .ijwb
 .bazelrc
 bazel-*
+.rules_terraform/
