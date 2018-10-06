@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"gopkg.in/yaml.v2"
 	"runtime"
-	"k8s.io/kubernetes/pkg/kubectl/cmd"
 	"io/ioutil"
 	"os"
 )
@@ -217,11 +216,11 @@ func (o kubectlObject) Properties() map[string]string {
 }
 
 // handy wrapper to execute a CLI command and return the result
-func execArgs(args ... string) (stdout string, stderr string, err error) {
-	if args[0] == "kubectl" {
-		args = args[1:]
+func executeArgs(args ... string) (stdout string, stderr string, err error) {
+	if args[0] != "kubectl" {
+		args = append([]string{"kubectl"}, args...)
 	}
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.Command(os.Args[0], args...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -233,24 +232,5 @@ func execArgs(args ... string) (stdout string, stderr string, err error) {
 		msg := fmt.Sprintf("%s:%d] ", file, line)
 		err = errors.New(msg + stderr + stdout)
 	}
-	return
-}
-
-func executeArgs(args ... string) (stdout string, stderr string, err error) {
-	if args[0] == "kubectl" {
-		args = args[1:]
-	}
-	outBuf := new(bytes.Buffer)
-	errBuf := new(bytes.Buffer)
-	command := cmd.NewKubectlCommand(&bytes.Buffer{}, outBuf, errBuf)
-	command.SetArgs(args)
-	err = command.Execute()
-	if err != nil {
-		_, file, line, _ := runtime.Caller(1)
-		msg := fmt.Sprintf("%s:%d] ", file, line)
-		err = errors.New(msg + stderr + stdout)
-	}
-	stdout = outBuf.String()
-	stderr = errBuf.String()
 	return
 }
