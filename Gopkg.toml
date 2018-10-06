@@ -20,10 +20,7 @@
 #  name = "github.com/x/y"
 #  version = "2.4.0"
 
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/golang/glog"
+ignored = ["k8s.io/kubernetes/pkg/kubectl/cmd"]
 
 [[constraint]]
   name = "github.com/hashicorp/terraform"

@@ -1,0 +1,13 @@
+diff --git pkg/kubectl/cmd/BUILD pkg/kubectl/cmd/BUILD
+index 0eac87025c..d4d189d6d7 100644
+--- pkg/kubectl/cmd/BUILD
++++ pkg/kubectl/cmd/BUILD
+@@ -53,7 +53,7 @@ go_library(
+     ],
+     importpath = "k8s.io/kubernetes/pkg/kubectl/cmd",
+     visibility = [
+-        "//build/visible_to:pkg_kubectl_cmd_CONSUMERS",
++        "//visibility:public",
+     ],
+     deps = [
+         "//pkg/api/legacyscheme:go_default_library",

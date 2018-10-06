@@ -2,6 +2,8 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("@bazel_gazelle//:def.bzl", "gazelle")
 load("@rules_terraform//terraform:def.bzl", "terraform_plugin")
 
+exports_files(glob(["*.patch"]))
+
 gazelle(
     name = "gazelle",
     prefix = "github.com/ceason/terraform-provider-kubectl",
@@ -20,11 +22,11 @@ go_library(
     importpath = "github.com/ceason/terraform-provider-kubectl",
     visibility = ["//visibility:private"],
     deps = [
-        "//vendor/github.com/golang/glog:go_default_library",
         "//vendor/github.com/hashicorp/terraform/helper/schema:go_default_library",
         "//vendor/github.com/hashicorp/terraform/plugin:go_default_library",
         "//vendor/github.com/hashicorp/terraform/terraform:go_default_library",
         "//vendor/gopkg.in/yaml.v2:go_default_library",
+        "@io_k8s_kubernetes//pkg/kubectl/cmd:go_default_library",
     ],
 )
 

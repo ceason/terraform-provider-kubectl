@@ -22,7 +22,7 @@ func Provider() *schema.Provider {
 						return ctx, nil
 					}
 					// default to current context from kubectl
-					stdout, _, err := executeCmd("kubectl config current-context", "")
+					stdout, _, err := executeArgs("config", "current-context")
 					return stdout, err
 				},
 			},

@@ -4,17 +4,19 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/golang/glog"
 	"os/exec"
 	"strings"
 	"strconv"
 	"gopkg.in/yaml.v2"
 	"runtime"
+	"k8s.io/kubernetes/pkg/kubectl/cmd"
+	"io/ioutil"
+	"os"
 )
 
 func NewKubectlCli(context string, defaultNamespace string) (*kubectlCli, error) {
 
-	stdout, _, err := executeCmd(fmt.Sprintf("kubectl --context=%s api-resources", context), "")
+	stdout, _, err := executeArgs(strings.Split(fmt.Sprintf("kubectl --context=%s api-resources", context), " ")...)
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +76,23 @@ type kubectlCli struct {
 }
 
 func (k *kubectlCli) Apply(cfg *kubectlObjectConfig, dryRun bool) (*kubectlObject, error) {
-	cmdStr := fmt.Sprintf("kubectl --namespace=%s --context=%s apply -ojson --dry-run=%s -f -", cfg.Metadata.Namespace, k.context, strconv.FormatBool(dryRun))
-	stdout, _, err := executeCmd(cmdStr, cfg.userProvidedYaml)
+	tmpfile, err := ioutil.TempFile("", fmt.Sprintf("%s-%s*.yaml", cfg.Metadata.Name, cfg.Kind))
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(cfg.userProvidedYaml)); err != nil {
+		return nil, err
+	}
+	if err := tmpfile.Close(); err != nil {
+		return nil, err
+	}
+	stdout, _, err := executeArgs("apply",
+		"--namespace", cfg.Metadata.Namespace,
+		"--context", k.context,
+		"-ojson",
+		fmt.Sprintf("--dry-run=%s", strconv.FormatBool(dryRun)),
+		"-f", tmpfile.Name())
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +108,7 @@ func (k *kubectlCli) Apply(cfg *kubectlObjectConfig, dryRun bool) (*kubectlObjec
 // delete all objects in the provided yaml
 func (k *kubectlCli) Delete(namespace, kind, name string) error {
 	cmdStr := fmt.Sprintf("kubectl --context=%s --namespace=%s delete %s %s", k.context, namespace, kind, name)
-	_, _, err := executeCmd(cmdStr, "")
+	_, _, err := executeArgs(strings.Split(cmdStr, " ")...)
 	return err
 }
 
@@ -130,7 +147,7 @@ func (k *kubectlCli) GetObject(resourceId string) (*kubectlObject, error) {
 	kind := parts[1]
 	name := parts[2]
 	cmdStr := fmt.Sprintf("kubectl --namespace=%s --context=%s get %s %s -ojson", namespace, k.context, kind, name)
-	stdout, _, err := executeCmd(cmdStr, "")
+	stdout, _, err := executeArgs(strings.Split(cmdStr, " ")...)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +166,7 @@ func (k *kubectlCli) ObjectExists(resourceId string) (bool, error) {
 		panic(err)
 	}
 
-	stdout, _, err := executeCmd(fmt.Sprintf("kubectl get --context=%s --namespace=%s %s -oname", k.context, namespace, kind), "")
+	stdout, _, err := executeArgs(strings.Split(fmt.Sprintf("kubectl get --context=%s --namespace=%s %s -oname", k.context, namespace, kind), " ")...)
 	if err != nil {
 		return false, err
 	}
@@ -200,13 +217,14 @@ func (o kubectlObject) Properties() map[string]string {
 }
 
 // handy wrapper to execute a CLI command and return the result
-func executeCmd(cmdStr string, stdin string) (stdout string, stderr string, err error) {
-	args := strings.Split(cmdStr, " ")
-	cmd := exec.Command(args[0], args[1:]...)
+func execArgs(args ... string) (stdout string, stderr string, err error) {
+	if args[0] == "kubectl" {
+		args = args[1:]
+	}
+	cmd := exec.Command("kubectl", args...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
-	cmd.Stdin = strings.NewReader(stdin)
 	err = cmd.Run()
 	stdout = outBuf.String()
 	stderr = errBuf.String()
@@ -214,25 +232,25 @@ func executeCmd(cmdStr string, stdin string) (stdout string, stderr string, err 
 		_, file, line, _ := runtime.Caller(1)
 		msg := fmt.Sprintf("%s:%d] ", file, line)
 		err = errors.New(msg + stderr + stdout)
-		glog.ErrorDepth(1, err)
-	} else {
-		glog.V(4).Infof("Exec success: %s\n%s%s", cmdStr, stdout, stderr)
 	}
 	return
 }
 
 func executeArgs(args ... string) (stdout string, stderr string, err error) {
-	cmd := exec.Command(args[0], args[1:]...)
-	var outBuf, errBuf bytes.Buffer
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &errBuf
-	err = cmd.Run()
-	stdout = outBuf.String()
-	stderr = errBuf.String()
+	if args[0] == "kubectl" {
+		args = args[1:]
+	}
+	outBuf := new(bytes.Buffer)
+	errBuf := new(bytes.Buffer)
+	command := cmd.NewKubectlCommand(&bytes.Buffer{}, outBuf, errBuf)
+	command.SetArgs(args)
+	err = command.Execute()
 	if err != nil {
 		_, file, line, _ := runtime.Caller(1)
 		msg := fmt.Sprintf("%s:%d] ", file, line)
 		err = errors.New(msg + stderr + stdout)
 	}
+	stdout = outBuf.String()
+	stderr = errBuf.String()
 	return
 }

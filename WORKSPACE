@@ -26,14 +26,27 @@ git_repository(
 
 git_repository(
     name = "io_bazel_rules_go",
-    commit = "f8c9f2c6336536147458aaccbd1becf5cc80232a",
+    commit = "40e2b78a314ebb91d0e690579ed3273683a3a1a1",
     remote = "https://github.com/bazelbuild/rules_go.git",
 )
 
 git_repository(
     name = "bazel_gazelle",
-    commit = "993d887662ad83bb60b9ba1570270d4afcda91a1",
+    tag = "0.14.0",
     remote = "https://github.com/bazelbuild/bazel-gazelle.git",
+)
+
+git_repository(
+    name = "io_k8s_kubernetes",
+    patches = ["@//:io_k8s_kubernetes.patch"],
+    remote = "https://github.com/kubernetes/kubernetes.git",
+    tag = "v1.12.0",
+)
+
+git_repository(
+    name = "io_kubernetes_build",
+    commit = "84d52408a061e87d45aebf5a0867246bdf66d180",
+    remote = "https://github.com/kubernetes/repo-infra.git",
 )
 
 load("@io_bazel_rules_docker//container:container.bzl", "repositories")
