@@ -1,4 +1,4 @@
-.idea/
+/.idea/
 
 # Created by .ignore support plugin (hsz.mobi)
 ### Go template
@@ -20,7 +20,8 @@
 .terraform/
 terraform.tfstate
 terraform.tfstate.*
-.ijwb
-.bazelrc
-bazel-*
+/.ijwb/
+/.bazelrc-local
+/bazel-*
 .rules_terraform/
+*.log

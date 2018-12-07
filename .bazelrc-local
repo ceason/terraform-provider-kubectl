@@ -1,0 +1,4 @@
+#common --override_repository=bazel_project_helpers=/home/ceason/src/rvgithub.com/redventures/bazel_project_helpers
+#common --override_repository=rules_spark=/home/ceason/src/github.com/ceason/rules_spark
+#common --override_repository=io_bazel_rules_scala=/home/ceason/src/github.com/bazelbuild/rules_scala
+common --override_repository=rules_terraform=/home/ceason/src/github.com/ceason/rules_terraform

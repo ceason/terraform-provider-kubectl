@@ -1,12 +1,28 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("@bazel_gazelle//:def.bzl", "gazelle")
-load("@rules_terraform//terraform:def.bzl", "terraform_plugin")
 
 exports_files(glob(["*.patch"]))
 
-gazelle(
-    name = "gazelle",
-    prefix = "github.com/ceason/terraform-provider-kubectl",
+# gazelle:prefix github.com/ceason/terraform-provider-kubectl
+
+# 'dep ensure' updates the vendor/ directory, which means we need to
+# re-run gazelle. This script takes care of that.
+genrule(
+    name = "dep-ensure",
+    outs = ["dep-ensure.sh"],
+    cmd = """cat <<'EOF' > $@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$$BUILD_WORKSPACE_DIRECTORY"
+$(location @com_github_golang_dep//cmd/dep) ensure
+$(location @bazel_gazelle//cmd/gazelle) update
+git add Gopkg.{lock,toml} vendor/. $$(find . -name BUILD -o -name BUILD.bazel)
+EOF""",
+    executable = True,
+    tools = [
+        "@bazel_gazelle//cmd/gazelle",
+        "@com_github_golang_dep//cmd/dep",
+    ],
 )
 
 go_library(
@@ -20,7 +36,7 @@ go_library(
         "types.go",
     ],
     importpath = "github.com/ceason/terraform-provider-kubectl",
-    visibility = ["//visibility:private"],
+    visibility = ["//visibility:public"],
     deps = [
         "//vendor/github.com/hashicorp/terraform/helper/schema:go_default_library",
         "//vendor/github.com/hashicorp/terraform/plugin:go_default_library",
@@ -33,31 +49,6 @@ go_library(
 go_binary(
     name = "terraform-provider-kubectl",
     embed = [":go_default_library"],
-    visibility = ["//visibility:public"],
-)
-
-go_binary(
-    name = "linux_amd64",
-    embed = [":go_default_library"],
-    goarch = "amd64",
-    goos = "linux",
-    pure = "on",
-)
-
-go_binary(
-    name = "darwin_amd64",
-    embed = [":go_default_library"],
-    goarch = "amd64",
-    goos = "darwin",
-    pure = "on",
-)
-
-terraform_plugin(
-    name = "plugin",
-    darwin_amd64 = ":darwin_amd64",
-    linux_amd64 = ":linux_amd64",
-    provider_name = "kubectl",
-    version = "v0.3.0",
     visibility = ["//visibility:public"],
 )
 
