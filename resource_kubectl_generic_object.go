@@ -278,6 +278,8 @@ func leafValues(pathPrefix string, obj interface{}) map[string]string {
 			for idx, value := range v {
 				walkNode(pathFmt(path, strconv.Itoa(idx)), value)
 			}
+		case nil:
+			// ignore nil values
 		default:
 			panic(fmt.Sprintf("I don't know about type %T!\n", v))
 		}
