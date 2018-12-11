@@ -26,8 +26,8 @@ git_repository(
 
 git_repository(
     name = "bazel_gazelle",
+    commit = "44ce230b3399a5d4472198740358fcd825b0c3c9",
     remote = "https://github.com/bazelbuild/bazel-gazelle.git",
-    tag = "0.15.0",
 )
 
 git_repository(
@@ -43,27 +43,23 @@ git_repository(
     remote = "https://github.com/kubernetes/repo-infra.git",
 )
 
-load("@io_bazel_rules_docker//container:container.bzl", "repositories")
-
-repositories()
-
-load("@io_bazel_rules_k8s//k8s:k8s.bzl", "k8s_defaults", "k8s_repositories")
-
-k8s_repositories()
-
 load("@io_bazel_rules_go//go:def.bzl", "go_register_toolchains", "go_rules_dependencies")
 
 go_rules_dependencies()
 
 go_register_toolchains()
 
-load("@rules_terraform//terraform:dependencies.bzl", "terraform_repositories")
-
-terraform_repositories()
-
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
 
 gazelle_dependencies()
+
+load("@io_bazel_rules_docker//container:container.bzl", "repositories")
+
+repositories()
+
+load("@rules_terraform//terraform:dependencies.bzl", "terraform_repositories")
+
+terraform_repositories()
 
 go_repository(
     name = "com_github_golang_dep",

@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/hashicorp/terraform/helper/schema"
 	"os"
+	"strings"
 )
 
 type providerConfig struct {
@@ -23,7 +24,7 @@ func Provider() *schema.Provider {
 					}
 					// default to current context from kubectl
 					stdout, _, err := executeArgs("config", "current-context")
-					return stdout, err
+					return strings.TrimSpace(stdout), err
 				},
 			},
 			"namespace": {
